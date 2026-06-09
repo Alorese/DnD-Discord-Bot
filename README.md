@@ -90,9 +90,9 @@ How to construct Payload
 
 ---
 
-=========================================================================================================
+<!-- ========================================================================================================= -->
                         D&D DISCORD BOT: METADATA & SESSION DELTA LOOP ARCHITECTURE
-=========================================================================================================
+<!-- ========================================================================================================= -->
 
   [ 1. CHARACTER SHEET LOAD / SESSION SETUP ]
   
@@ -119,7 +119,7 @@ How to construct Payload
                      • System is now primed and ready for player turns.
                                          │
                                          ▼
-=========================================================================================================
+<!-- ========================================================================================================= -->
   [ 2. ACTIVE TACTICAL GAMEPLAY LOOP ]
   
                                   [ PLAYER CHAT INPUT ]
@@ -186,6 +186,7 @@ How to construct Payload
                             • Bot posts narrative text block to Discord.
                             • Unlocks channel for the next player initiative.
 
+---
 
 # notes:
 - implement In-Memory Lock/Queue system (`asyncio.Lock()`) to prevent double click errors
@@ -197,6 +198,7 @@ How to construct Payload
 
 
 
+---
 
 File Structure
 
@@ -237,3 +239,5 @@ dnd-discord-bot/
     └── templates/             # Prompt engineering file directory
         ├── narrator_prompt.j2 # Jinja2 storytelling prompt template
         └── rule_check.j2      # Jinja2 tactical evaluation mechanics prompt
+
+---
