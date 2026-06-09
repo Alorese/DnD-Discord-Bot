@@ -39,6 +39,7 @@ The bot uses a multi-model AI pipeline with MongoDB to track game state and Gemi
 
 optional:
 - `WHITELIST_CHANNEL_IDS` - a comma-separated list of Discord channel IDs where the bot is allowed to operate.
+
 ---
 
 ## Quick Start
@@ -46,9 +47,7 @@ optional:
 
 ---
 
-=========================================================================================================
                       MASTER D&D DISCORD BOT FLOWCHART (MONGO + BEANIE + CACHE + JINJA2)
-=========================================================================================================
 
   [ 1. INITIAL SESSION & CHARACTER SEEDING LOOP ]
   
@@ -80,8 +79,7 @@ optional:
                                            │
                                            ▼
                             [ 2. ACTIVE RUNTIME TACTICAL LOOP ]
-=========================================================================================================
-  [ 2. ACTIVE RUNTIME TACTICAL LOOP ]
+
   
                                     [ PLAYER INPUT MESSAGE ]
                     (e.g., "Thia casts Misty Step to teleport past the pit trap")
