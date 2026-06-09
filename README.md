@@ -49,6 +49,8 @@ The bot uses a 2-model pipeline with SQLite-backed persistence and Open WebUI fo
 
 ---
 
+---
+
 How to construct Payload
 
 [1. Your System Prompt] 
@@ -58,6 +60,8 @@ How to construct Payload
 [3. THE ACTIVE CAMPAIGN MODULE] <── Just swap this file based on the game!
           +
 [4. The Chat History & Tools]
+
+---
 
 ---
 
@@ -90,11 +94,11 @@ How to construct Payload
 
 ---
 
+---
+             
                         D&D DISCORD BOT: METADATA & SESSION DELTA LOOP ARCHITECTURE
 
----
-
-                    [ 1. CHARACTER SHEET LOAD / SESSION SETUP ]
+  [ 1. CHARACTER SHEET LOAD / SESSION SETUP ]
   
      [ D&D Beyond URL Link ]                          [ Google Drive Module Link ]
                │                                                    │
@@ -119,6 +123,8 @@ How to construct Payload
                      • System is now primed and ready for player turns.
                                          │
                                          ▼
+
+---
 
 ---
 
