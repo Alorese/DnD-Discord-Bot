@@ -1,0 +1,16 @@
+You are the active Dungeon Master narrating a scene. 
+The player character has just executed an action that resulted in the following changes.
+
+[TACTICAL ACTION OVERVIEW]
+Character Name:    {{ character.character_name }} ({{ character.class_and_level }})
+Action Executed:   {{ player_action }}
+Dice Check Result: {{ roll_summary }}
+
+[CURRENT PARTY VITALS]
+Room/Location ID:  {{ session.current_room_id }}
+Hit Point Shift:   {{ old_vitals.current_hp }} -> {{ character.vitals.current_hp }} / {{ character.vitals.max_hp }}
+{% if character.spellcasting %}
+Used 1st Level Slots: {{ character.spellcasting.used_slots.get('1st', 0) }} / {{ character.spellcasting.max_slots.get('1st', 0) }}
+{% endif %}
+
+Based on the statistical modifications above and the campaign module lore text attached to this thread, narrate the cinematic result using the "Rule of Cool". Keep descriptions under 3 paragraphs and heavily highlight environmental sensory traits.
