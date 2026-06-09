@@ -30,11 +30,43 @@ The bot uses a multi-model AI pipeline with MongoDB to track game state and Gemi
 - google-genai: Presumably a client for Google's GenAI services.
 - Jinja2: A templating engine for generating dynamic content.
 
+## MongoDB External Container
+- MongoDB: A NoSQL database for storing data.
+  - `docker-compose.yml` for MongoDB, add .env variables `MONGO_ROOT_USER=<admin>` and `MONGO_ROOT_PASS=<password>`
+  ```
+  services:
+    mongodb:
+      image: mongo:latest
+      container_name: mongodb-dnd
+      restart: unless-stopped
+      ports:
+        - "27017:27017"
+      environment:
+        MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+        MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS}
+      networks:
+        - dnd_shared_network
+      volumes:
+        - mongo_data:/data/db
+
+  networks:
+    dnd_shared_network:
+      external: true
+  volumes:
+    mongo_data:
+  ```
+
 ## Required Environment Variables
 
 - `DISCORD_BOT_TOKEN`: Your Discord bot token.
 - `MONGO_URI`: The connection URI for your MongoDB database.
 - `GOOGLE_API_KEY`: Your Google API key for accessing GenAI services.
+`.env`
+```
+DISCORD_BOT_TOKEN=<YOUR_TOKEN_GOES_HERE>
+GEMINI_API_KEY=<YOUR_API_KEY_GOES_HERE>
+MONGO_URI=mongodb://<admin>:<password>@mongodb:27017/dnd_bot?authSource=admin
+```
 
 
 optional:
@@ -49,7 +81,7 @@ optional:
 
                       
                 MASTER D&D DISCORD BOT FLOWCHART (MONGO + BEANIE + CACHE + JINJA2)
-                  [ 1. INITIAL SESSION & CHARACTER SEEDING LOOP ]
+                    [ 1. INITIAL SESSION & CHARACTER SEEDING LOOP ]
   
      [ D&D Beyond Sheet URL ]                         [ Google Drive Campaign Module Link ]
                  │                                                      │
@@ -80,7 +112,6 @@ optional:
                                            ▼
                             [ 2. ACTIVE RUNTIME TACTICAL LOOP ]
 
-  
                                     [ PLAYER INPUT MESSAGE ]
                     (e.g., "Thia casts Misty Step to teleport past the pit trap")
                                            │
