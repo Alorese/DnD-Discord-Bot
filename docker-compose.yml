@@ -1,31 +1,13 @@
 version: '3.8'
 
 services:
-  # SERVICE 1: The Self-Hosted MongoDB Storage Engine
-  mongodb:
-    image: mongo:latest
-    container_name: dnd_bot_database
-    restart: unless-stopped
-    ports:
-      - "27017:27017" # Exposes port locally so you can browse data using MongoDB Compass
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin_dm
-      MONGO_INITDB_ROOT_PASSWORD: super_secret_password_here
-    volumes:
-      - mongo_data:/data/db # Safeguards your game sessions even if the container is wiped
-
-  # SERVICE 2: Your Python/Beanie Discord Bot Engine
   discord_bot:
-    build: . # Looks for a 'Dockerfile' in your current root directory to build your bot
+    build: .
     container_name: dnd_discord_bot
     restart: unless-stopped
-    depends_on:
-      - mongodb # Ensures the bot container waits for MongoDB to start up first
-    environment:
-      - DISCORD_BOT_TOKEN=your_discord_token_here
-      - GEMINI_API_KEY=your_google_api_key_here
-      # Notice how the link string uses the service name 'mongodb' instead of localhost!
-      - MONGO_URI=mongodb://admin_dm:super_secret_password_here@mongodb:27017/dnd_bot?authSource=admin
+    networks:
+      - dnd_shared_network # Both containers must occupy this exact network channel
 
-volumes:
-  mongo_data: # Declares the permanent cloud/local storage partition block
+networks:
+  dnd_shared_network:
+    external: true

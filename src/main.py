@@ -3,6 +3,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from database.connection import init_database
+from config.settings import settings
 
 # Initialize the Bot client
 intents = discord.Intents.default()
@@ -26,14 +27,13 @@ async def load_extensions():
 
 async def main():
     # 1. Boot up the MongoDB & Beanie mapping connection layer
-    await init_database()
+    await init_database(settings.mongo_uri)
     
     # 2. Register all game loop cogs
     await load_extensions()
     
     # 3. Connect to the Discord Gateway
-    token = os.environ.get("DISCORD_BOT_TOKEN")
-    await bot.start(token)
+    await bot.start(settings.discord_bot_token)
 
 if __name__ == "__main__":
     asyncio.run(main())

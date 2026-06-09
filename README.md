@@ -1,15 +1,15 @@
 # DnD Discord Dungeon Master Bot
 
-An AI-driven Dungeon Master bot for Discord that allows players to link character sheets, play D&D modules, and roleplay without needing a book or dice.
+An AI-driven Dungeon Master bot for Discord that allows players bring their own character sheets from DnD Beyond, play D&D modules, and roleplay without needing an experienced human Dungeon Master!
 
-The bot uses a 2-model pipeline with SQLite-backed persistence and Open WebUI for external model inference and RAG support.
+The bot uses a 2-model pipeline with MongoDB to track game state and Gemini 3.1 Flash Lite for context caching and swift replies.
 
 ---
 
 ## Technical Stack
 
 - **Python & Pydantic** - Bot runner, slash commands, and data shape validation.
-- **SQLite** - Persistent game state storage via `database.py`.
+- **MongoDB** - Persistent game state storage
 - **Open WebUI** - Hosts the LLM models and external RAG knowledge base (PHB/DMG) outside this repository.
    - **Model 1: Chat Parser Model** - Filters OOC banter and parses player actions into structured payloads. (Gemini 3.1 Flash Lite - Low Reasoning)
    - **Model 2: GM / Rule Model** - Narrator, rule arbiter, and tool orchestrator. (Gemini 3.5 Flash or 3.1 Flash Lite - Medium Reasoning)
@@ -19,187 +19,122 @@ The bot uses a 2-model pipeline with SQLite-backed persistence and Open WebUI fo
 
 ## Required Environment Variables
 
-- `DISCORD_BOT_TOKEN` - generate from Discord Developer Portal (remember to turn on Priveleged Gateway Intents ie. presence, server members, message contet)
-- `WHITELIST_CHANNEL_IDS` - enter developer mode in discord and right click channel
+- `DISCORD_BOT_TOKEN` - generate from Discord Developer Portal (remember to turn on Priveleged Gateway Intents ie. presence, server members, message content)
+- `WHITELIST_CHANNEL_IDS` - only listens to specific channels, enter developer mode in discord and right click channel
+- `MONGO_URI` - mongodb://admin_dm:super_secret_password_here@mongodb:27017/dnd_bot?authSource=admin
+- `GEMINI_API_KEY` - Google AI Studio API Key
+- `DND_DDB_PARSER_ID` - model id for DnD Beyond and Module Ingestion
 - `DND_CHAT_PARSER_ID` - model id for your chat parser model
-- `DND_DM_ID` - model id for your dm model
+- `DND_RULE_ID` - model id for rule keeper model
+- `DND_NARRATOR_ID` - model id for your narrator model
 
 ---
 
 ## Initialization
-- `docker compose up --build` - run docker command to start bot and db
- - SQLite DB will create if it doesn't exist
- - Bot begins listening for messages on specific discord channel
+- `docker compose up --build` - run docker command to start bot - requires external MongoDB
+ - Bot begins listening for messages on specific discord channels
 
 ---
 
-┌────────────────────────────────────────────────────────────────────────┐
-│                        DISCORD BOT COG LAYER                           │
-└────────────────────────────────────────────────────────────────────────┘
-    │           │                  │                    │
-    ▼           ▼                  ▼                    ▼
-┌───────────┐ ┌───────────┐ ┌──────────────┐ ┌──────────────────────────┐
-│ SLASHEG   │ │ STATUSEG  │ │ ACTION COG   │ │ LOREKEEPER COG (@bot)    │
-├───────────┤ ├───────────┤ ├──────────────┤ ├──────────────────────────┤
-│/commands  │ │ !status   │ │ In-Character │ │ • Intercepts app mentions│
-│• Join/Load│ │ • Quick DB│ │ Text Loop    │ │ • Triggers OOC pipeline  │
-│• Sync DDB │ │   reads   │ │ • Runs full  │ │ • Rules/Lore context   │
-│• Check in │ │ • $0 Cost │ │   multi-LLM  │ │   Q&A lookups          │
-└───────────┘ └───────────┘ └──────────────┘ └──────────────────────────┘
+=========================================================================================================
+                      MASTER D&D DISCORD BOT FLOWCHART (MONGO + BEANIE + CACHE + JINJA2)
+=========================================================================================================
 
----
-
----
-
-How to construct Payload
-
-[1. Your System Prompt] 
-          +
-[2. The Core Rulebooks (PHB/MM)] 
-          +
-[3. THE ACTIVE CAMPAIGN MODULE] <── Just swap this file based on the game!
-          +
-[4. The Chat History & Tools]
-
----
-
----
-
-[ Player Inputs Action ]
-            │
-            ▼
-┌────────────────────────────────────────────────────────┐
-│ 1. PYTHON DATABASE GATEWAY (Beanie ODM)                │
-├────────────────────────────────────────────────────────┤
-│ • Looks up character's current 'room_id' from Session. │
-│ • Pulls the strict 'RoomContext' from MongoDB.         │
-└────────────────────────────────────────────────────────┘
-            │
-            ▼
-┌────────────────────────────────────────────────────────┐
-│ 2. JINJA2 PROMPT CONSTRUCT (templates/rule_check.j2)   │
-├────────────────────────────────────────────────────────┤
-│ • Stitches: Rulebooks + Character Sheet + Room Hazards  │
-│ • Completely leaves out past chat logs.                │
-└────────────────────────────────────────────────────────┘
-            │
-            ▼
-┌────────────────────────────────────────────────────────┐
-│ 3. RULE CHECK MODEL EVALUATION (Gemini 3.1 Flash-Lite)  │
-├────────────────────────────────────────────────────────┤
-│ • Reads: "Action: I leap the chasm."                   │
-│ • Reads: "Room Hazard: 200ft wide open pit (Jump = Imp)"│
-│ • Outputs: Rejection block instantly.                  │
-└────────────────────────────────────────────────────────┘
-
----
-
----
-             
-                        D&D DISCORD BOT: METADATA & SESSION DELTA LOOP ARCHITECTURE
-
-  [ 1. CHARACTER SHEET LOAD / SESSION SETUP ]
+  [ 1. INITIAL SESSION & CHARACTER SEEDING LOOP ]
   
-     [ D&D Beyond URL Link ]                          [ Google Drive Module Link ]
-               │                                                    │
-               ▼                                                    ▼
-     [ Python HTTP Request ]                              [ Python HTTP Request ]
-               │                                                    │
-               ▼                                                    ▼
-      [ LLM SMART PARSER ]                               [ GOOGLE DRIVE EXTRACTOR ]
-     (Cleans messy nested JSON)                           (Converts PDF/Doc to Markdown)
-               │                                                    │
-               ▼                                                    ▼
-   [ SQLite: CACHED BASELINE DATA ]                       [ GEMINI FILE API STORAGE ]
-   • Overwrites: base_skills, base_ac, stats              • Uploads 200k+ token module text
-   • Preserves: mid-session HP/slots deltas               • Returns a fixed 'Gemini File URI'
-               │                                                    │
-               └─────────────────────────┬──────────────────────────┘
-                                         │
-                                         ▼
-                     [ /join_session OR /start_campaign COMMAND ]
-                     • Binds Discord Channel ID to active Module URI.
-                     • Pulls & merges local Session Deltas with Baseline sheet stats.
-                     • System is now primed and ready for player turns.
-                                         │
-                                         ▼
-
----
-
----
-
-  [ 2. ACTIVE TACTICAL GAMEPLAY LOOP ]
+     [ D&D Beyond Sheet URL ]                         [ Google Drive Campaign Module Link ]
+                 │                                                      │
+                 ▼                                                      ▼
+       [ LLM SMART PARSER ]                                  [ GOOGLE DRIVE EXTRACTOR ]
+    (Extracts JSON Object map)                             (Generates Direct PDF Stream URL)
+                 │                                                      │
+                 ▼                                                      ▼
+     ┌───────────────────────┐                              ┌───────────────────────┐
+     │  MONGODB COLLECTION:  │                              │   GEMINI FILE BUCKET  │
+     │      "characters"     │                              │ (Pre-caches the 200k+ │
+     │ (Saves baseline stats;│                              │  token module novel)  │
+     │  clears active deltas)│                              └───────────────────────┘
+     └───────────────────────┘                                          │
+                 │                                                      ▼
+                 │                                          ┌───────────────────────┐
+                 │                                          │  MONGODB COLLECTION:  │
+                 │                                          │    "room_contexts"    │
+                 │                                          │  (Saves structural    │
+                 │                                          │   room hazard details)│
+                 └─────────────────────────┬────────────────└───────────────────────┘
+                                           │
+                                           ▼
+                       [ /start_campaign OR /join_session COMMAND ]
+                       • Activates `setup_cog.py`. Binds Discord Channel to Module URI.
+                       • System initializes local room states and primes the game loops.
+                                           │
+                                           ▼
+=========================================================================================================
+  [ 2. ACTIVE RUNTIME TACTICAL LOOP ]
   
-                                  [ PLAYER CHAT INPUT ]
-                  (e.g., "Thia casts Misty Step to teleport past the trap")
-                                         │
-                                         ▼
-                      ┌─────────────────────────────────────────────────────┐
-                      │ 2A. PYTHON REGEX & STATE PARSER                     │
-                      ├─────────────────────────────────────────────────────┤
-                      │ • Wrapped in ((brackets))? ──► Ignore as OOC        │
-                      │ • Starts with prefix (!)?  ──► Query SQLite & Reply │
-                      │ • Natural Game Action?     ──► Forward to step 2B   │
-                      └─────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-                      ┌─────────────────────────────────────────────────────┐
-                      │ 2B. RULE CHECK MODEL (Gemini 3.1 Flash-Lite)        │
-                      ├─────────────────────────────────────────────────────┤
-                      │ • Reads: Player Action + Merged Character State     │
-                      │ • Task: Enforces rules text (PHB/Monster Manual)    │
-                      │                                                     │
-                      │    ├── [REJECT] ──► "Out of range / slots" ──► Stop │
-                      │    └── [APPROVE] ──► Output structured JSON:         │
-                      │                      {"action_valid": true,         │
-                      │                       "roll_type": "Spellcasting",  │
-                      │                       "target_dc": 14}              │
-                      └─────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-                      ┌─────────────────────────────────────────────────────┐
-                      │ 2C. BOT INTERRUPT & COMPONENT GENERATION            │
-                      ├─────────────────────────────────────────────────────┤
-                      │ • Python pauses the generative LLM pipeline.        │
-                      │ • Locks player channel to prevent input spamming.   │
-                      │ • Bot posts Discord Embed + Interactive Component:  │
-                      │   "Thia casts Misty Step! [Click to Roll Arcana]"   │
-                      └─────────────────────────────────────────────────────┘
-                                         │
-                                         ▼  ( Player physically clicks the button 🔘 )
-                      ┌─────────────────────────────────────────────────────┐
-                      │ 2D. DETERMINISTIC RESOLUTION ENGINE                 │
-                      ├─────────────────────────────────────────────────────┤
-                      │ • Python server rolls secure server-side 1d20.      │
-                      │ • Fetches modifier from SQLite `base_skills_json`.  │
-                      │ • Calculates: [1d20] + [Modifier] vs [Target DC].  │
-                      │ • Edits Discord embed to show mathematical success. │
-                      │ • MUTATES SESSION DELTA: Deducts spell slot inside  │
-                      │   `session_used_slots_json` in the SQLite row.      │
-                      └─────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-                      ┌─────────────────────────────────────────────────────┐
-                      │ 2E. DM NARRATOR MODEL (Gemini 3.1 Flash-Lite + CACHE)│
-                      ├─────────────────────────────────────────────────────┤
-                      │ • Context: Loads cached Campaign Module via File URI│
-                      │ • Input Payload: Action + Roll Result + State Delta │
-                      │ • Task: Extracts local room descriptions/hazards    │
-                      │         from the book, weaves cinematic narrative    │
-                      │         using the "Rule of Cool" framework.         │
-                      └─────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-                            [ FINAL PRESENTATION LAYER ]
-                            • Bot posts narrative text block to Discord.
-                            • Unlocks channel for the next player initiative.
+                                    [ PLAYER INPUT MESSAGE ]
+                    (e.g., "Thia casts Misty Step to teleport past the pit trap")
+                                           │
+                                           ▼
+                    ┌───────────────────────────────────────────────────────┐
+                    │ 2A. MAIN APPLICATION PARSER GATEWAY                   │
+                    ├───────────────────────────────────────────────────────┤
+                    │ • Matches prefix (!)?  ──► Read Local MongoDB DB      │
+                    │ • Matches tag (@bot)?  ──► Route to `lorekeeper_cog`  │
+                    │ • In-Character Text?   ──► Route to `action_cog.py`   │
+                    └───────────────────────────────────────────────────────┘
+                                           │
+                                           ▼ (In-Character Route)
+                    ┌───────────────────────────────────────────────────────┐
+                    │ 2B. RULE CHECK MODEL (Gemini 3.1 Flash-Lite + CACHE)  │
+                    ├───────────────────────────────────────────────────────┤
+                    │ • Input: Player Action + Character Baseline Sheet.    │
+                    │ • Input: Current room hazard states from MongoDB.     │
+                    │ • Note: Chat History is left out to prevent noise.    │
+                    │                                                       │
+                    │    ├── [REJECT] ──► "Impossible action" ──► End Loop. │
+                    │    └── [APPROVE] ──► Outputs JSON:                    │
+                    │                      {"valid": true, "roll": "Arcana"}│
+                    └───────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+                    ┌───────────────────────────────────────────────────────┐
+                    │ 2C. BOT INTERRUPT & UI COMPONENT GENERATION           │
+                    ├───────────────────────────────────────────────────────┤
+                    │ • Python application freezes the active player thread.│
+                    │ • Bot prints custom interactive UI block to Discord:  │
+                    │   "Thia casts Misty Step! [Click to Roll Arcana]"     │
+                    └───────────────────────────────────────────────────────┘
+                                           │
+                                           ▼ (Player physically clicks the UI Button 🔘)
+                    ┌───────────────────────────────────────────────────────┐
+                    │ 2D. DETERMINISTIC PYTHON RESOLUTION ENGINE            │
+                    ├───────────────────────────────────────────────────────┤
+                    │ • Backend server executes a secure 1d20 random roll.  │
+                    │ • Automatically pulls modifier from `base_skills`.    │
+                    │ • Edits Discord UI embed block showing absolute math. │
+                    │ • MUTATES DELTA STATE: `await character.save()`       │
+                    │   (Deducts spell slot inside MongoDB collections)     │
+                    └───────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+                    ┌───────────────────────────────────────────────────────┐
+                    │ 2E. DM NARRATOR MODEL (Gemini 3.1 Flash-Lite + CACHE) │
+                    ├───────────────────────────────────────────────────────┤
+                    │ • Context: Loads cached module from File URI.         │
+                    │ • Input: Jinja2 renders prompt file string containing │
+                    │   (Action + Roll Result + Vitals Delta + Chat Window) │
+                    │ • Output: Cinematic storytelling narration.           │
+                    └───────────────────────────────────────────────────────┘
+                                           │
+                                           ▼
+                              [ FINAL PRESENTATION LAYER ]
+                    • Bot outputs narrator's rich narrative embed to channel.
+                    • Unlocks player channel thread for the next active turn.
 
 ---
 
-# notes:
-- implement In-Memory Lock/Queue system (`asyncio.Lock()`) to prevent double click errors
-- swap SQLite to Beanie with MongoDB
-- Pydantic (already using)
-- cache character sheets at start of session
-- add Discord.ui.View and discrod.ui.Button in game_loop cog
-- use Jinja2 to pass alone old_state, new_state, and action to from python engine -> dm_narrator
+# TODOs:
+[] implement In-Memory Lock/Queue system (`asyncio.Lock()`) to prevent double click errors
+[] cache character sheets at start of session
+[] add Discord.ui.View and discrod.ui.Button in game_loop cog
