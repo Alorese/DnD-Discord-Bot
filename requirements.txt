@@ -1,5 +1,16 @@
-python-dotenv
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-google
-beanie
+# Core Discord Application Framework
+discord.py==2.4.0
+
+# Database Storage & Document Object Mapping (Async MongoDB)
+motor==3.6.0
+beanie==2.7.0
+
+# Modern Type-Safety & Settings Validation
+pydantic==2.10.0
+pydantic-settings==2.7.0
+
+# Official Modern Google Gen AI Infrastructure 
+google-genai==1.3.0
+
+# Template Engine Prompt Separation
+Jinja2==3.1.5
