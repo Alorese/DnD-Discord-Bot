@@ -8,12 +8,7 @@ The bot uses a 2-model pipeline with MongoDB to track game state and Gemini 3.1 
 
 ## Technical Stack
 
-- **Python & Pydantic** - Bot runner, slash commands, and data shape validation.
-- **MongoDB** - Persistent game state storage
-- **Open WebUI** - Hosts the LLM models and external RAG knowledge base (PHB/DMG) outside this repository.
-   - **Model 1: Chat Parser Model** - Filters OOC banter and parses player actions into structured payloads. (Gemini 3.1 Flash Lite - Low Reasoning)
-   - **Model 2: GM / Rule Model** - Narrator, rule arbiter, and tool orchestrator. (Gemini 3.5 Flash or 3.1 Flash Lite - Medium Reasoning)
-   - **Model 3: LoreKeeper Model** - helps with onboarding by validating character sheets, modules, and other `/commands` for players. (3.1 Flash Lite)
+
 
 ---
 
@@ -135,6 +130,9 @@ The bot uses a 2-model pipeline with MongoDB to track game state and Gemini 3.1 
 ---
 
 # TODOs:
+
 [] implement In-Memory Lock/Queue system (`asyncio.Lock()`) to prevent double click errors
+
 [] cache character sheets at start of session
+
 [] add Discord.ui.View and discrod.ui.Button in game_loop cog
