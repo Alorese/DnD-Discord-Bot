@@ -31,8 +31,7 @@ The bot uses a multi-model AI pipeline with MongoDB to track game state and Gemi
 - Jinja2: A templating engine for generating dynamic content.
 
 ## MongoDB External Container
-- MongoDB: A NoSQL database for storing data.
-  - `docker-compose.yml` for MongoDB, add .env variables `MONGO_ROOT_USER=<admin>` and `MONGO_ROOT_PASS=<password>`
+  - `docker-compose.yml` add .env variables `MONGO_ROOT_USER=<admin>` and `MONGO_ROOT_PASS=<password>`
   ```
   services:
     mongodb:
@@ -56,11 +55,14 @@ The bot uses a multi-model AI pipeline with MongoDB to track game state and Gemi
     mongo_data:
   ```
 
+  Then run `docker-compose up --build -d`
+
 ## Required Environment Variables
 
 - `DISCORD_BOT_TOKEN`: Your Discord bot token.
 - `MONGO_URI`: The connection URI for your MongoDB database.
-- `GOOGLE_API_KEY`: Your Google API key for accessing GenAI services.
+- `GEMINI_API_KEY`: Your Google API key for accessing GenAI services.
+
 `.env`
 ```
 DISCORD_BOT_TOKEN=<YOUR_TOKEN_GOES_HERE>
@@ -177,6 +179,19 @@ optional:
 # TODOs:
 
 [] implement In-Memory Lock/Queue system (`asyncio.Lock()`) to prevent double click errors
+  ensure that the lock is **keyed to the Discord channel or User ID**. If you lock globally, you will accidentally bottleneck your entire bot to one action at a time across all servers. Use a `dict` of `asyncio.Lock()` objects:
+    ```python
+    self.locks = collections.defaultdict(asyncio.Lock)
+    # ... inside your action handler ...
+    async with self.locks[channel_id]:
+        # Process turn
+    ```
+  disabling the button immediately upon the first interaction:
+    ```python
+    async def callback(self, interaction: discord.Interaction):
+        self.disabled = True
+        await interaction.response.edit_message(view=self)
+        # Proceed with logic...
 
 [] cache character sheets at start of session
 
