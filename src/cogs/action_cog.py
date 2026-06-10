@@ -234,6 +234,19 @@ class ActionCog(commands.Cog):
                 action_text=message.content
             )
             
+            if "[AWARD_INSPIRATION:" in response.text:
+                # 1. Strip the tag from the narrative so players don't see raw system text
+                clean_story = re.sub(r'\[AWARD_INSPIRATION:.*?\]', '', response.text)
+                
+                # 2. Mutate MongoDB state natively via Beanie ODM
+                character.vitals.has_heroic_inspiration = True
+                await character.save()
+                
+                # 3. Inform the channel with a rich announcement card
+                await interaction.followup.send(clean_story)
+                await interaction.channel.send(f"✨ **Inspiration Earned!** The DM was moved by your roleplay. {character.character_name} gains Heroic Inspiration!")
+
+            
         await message.reply(
             f"🎲 Action Validated: {character.character_name} attempts to execute their action.\n"
             f"Requires a DC {decision['target_dc']} {decision['roll_required']} check.",
