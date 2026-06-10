@@ -6,6 +6,14 @@ The bot uses a multi-model AI pipeline with MongoDB to track game state and Gemi
 
 ---
 
+## AI Model
+
+The bot uses Google's Gemini 3.1 Flash Lite model for its AI capabilities. Currently there is no support for other models, but this may change in the future.
+Only the Flash Lite model is supported due to its low cost, high speed, and most imporantly its ability to cache context for the duration of a game session.
+The
+
+---
+
 ## Technical Stack
 
 - Language: Python 3
@@ -196,3 +204,6 @@ optional:
 [] cache character sheets at start of session
 [] implement rule of cool nat 20 success override
 [] implement inspiration (gain advantage on next roll)
+[] setup payment for Gemini 3.1 Flash Lite - Pay As You Go (PAYG) plan to enable Context Caching
+[] setup Time-to-Live (TTL) so that it debounces for 30 minutes after every action
+[] clear Time-to-Live upon /end_session

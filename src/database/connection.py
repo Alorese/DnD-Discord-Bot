@@ -37,22 +37,6 @@ async def init_database(mongo_uri: str):
                 GameSession
             ]
         )
-        # try:
-        #     db_handle = client.get_default_database()
-        # except Exception:
-        #     # Fallback if no database is specified in the URI
-        #     db_handle = client["dnd_bot"]
-        
-        # # ...
-        # await init_beanie(
-        #     db_handle,
-        #     document_models=[
-        #         CampaignModule,
-        #         RoomContext,
-        #         CharacterSheet,
-        #         GameSession
-        #     ]
-        # )
         
         print("🚀 Beanie ODM mappings established. Local collection schemas matched successfully.")
         return True

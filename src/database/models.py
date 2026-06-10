@@ -105,6 +105,13 @@ class CharacterSheet(Document):
         name = "characters"
         indexes = [[("channel_id", 1), ("player_id", 1)]]
     
+class ReadiedAction(BaseModel):
+    """Stores a player's held action and their explicit environmental trigger."""
+    player_id: str
+    character_name: str
+    trigger_condition: str                # e.g., "if a goblin opens the door"
+    held_action: str                      # e.g., "I fire my longbow at it"
+    skill_or_tool: str = "Attack"         # Default check category
 
 class GameSession(Document):
     """Maintains the active runtime, turn structures, and state flags for a game thread."""
@@ -114,11 +121,13 @@ class GameSession(Document):
     initiative_order: List[str] = Field(default_factory=list) # Session turn sequence tracking
     current_turn_index: int = 0
     last_activity: datetime = Field(default_factory=datetime.utcnow)
+    active_module: Link[CampaignModule]
     
+    # 💎 NEW: Direct array listing of all readied triggers currently active in this room
+    readied_actions: List[ReadiedAction] = Field(default_factory=list)
+
     # Creates a type-safe relational lazy-link to the parent CampaignModule collection document
     active_module: Link[CampaignModule]
 
     class Settings:
         name = "game_sessions"
-
-

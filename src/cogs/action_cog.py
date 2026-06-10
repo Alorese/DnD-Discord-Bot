@@ -11,73 +11,38 @@ from services.gemini_client import gemini_service
 from google.genai import types
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-# Setup Jinja2 prompt template environment
+# Setup Jinja2 template workspace parsing framework
 jinja_env = Environment(
     loader=FileSystemLoader("src/templates"),
     autoescape=select_autoescape()
 )
 
 # ==============================================================================
-# DISCORD UI INTERACTIVE COMPONENT (The Roll Button View)
+# SINGLE PLAYER INTERACTIVE VIEW ENGINE (Multi-Stage 2024 State Machine)
 # ==============================================================================
-class DiceRollView(discord.ui.View):
+class SinglePlayerRollView(discord.ui.View):
     """
-    Spins up an interactive button tied securely to a specific player session.
-    Fires the deterministic math engine natively on click and hands off to the Narrator.
+    Manages a proactive, single-player action check. 
+    Implements a multi-stage 2024 state machine for Heroic Inspiration fallbacks.
     """
     def __init__(self, channel_id: str, player_id: str, roll_type: str, target_dc: int, action_text: str):
-        # Timeout after 2 minutes of player hesitation
         super().__init__(timeout=120)
         self.channel_id = channel_id
         self.player_id = player_id
         self.roll_type = roll_type
         self.target_dc = target_dc
         self.action_text = action_text
-
-    @discord.ui.button(label="🎲 CLICK TO ROLL", style=discord.ButtonStyle.primary, custom_id="dnd_roll_btn")
-    async def roll_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 1. Enforce user security check: Only the player attempting the action can roll
-        if str(interaction.user.id) != self.player_id:
-            await interaction.response.send_message("This isn't your fate to decide, adventurer!", ephemeral=True)
-            return
-
-        # Disable the button immediately to stop rapid double-clicking exploits
-        button.disabled = True
-        await interaction.message.edit(view=self)
         
-        # Acknowledge interaction instantly to prevent Discord gateway timeouts
-        await interaction.response.defer()
+        # Track roll steps locally in memory cache
+        self.first_roll = None
+        self.final_total = None
 
-        # 2. Execute Deterministic Server-Side Math
-        d20 = random.randint(1, 20)
-        character = await CharacterSheet.find_one(
-            CharacterSheet.channel_id == self.channel_id,
-            CharacterSheet.player_id == self.player_id
-        )
-        
-        # Pull modifier safely from our Pydantic dictionary layer
-        modifier = character.base_skills.get(self.roll_type, 0)
-        total = d20 + modifier
-        success = total >= self.target_dc
-        success_str = "SUCCESS" if success else "FAILURE"
-        
-        roll_summary = f"{success_str}! Rolled {d20} + {modifier} = {total} (vs DC {self.target_dc})"
-
-        # 3. Apply Local Database State Mutations (Example: Damage tracking if failed)
-        old_vitals = character.vitals.copy()
-        if not success:
-            # Trap or environment penalty logic example
-            if character.vitals.session_current_hp is None:
-                character.vitals.session_current_hp = character.vitals.base_max_hp
-            character.vitals.session_current_hp = max(0, character.vitals.session_current_hp - 4)
-            await character.save()
-
-        # Update the UI layout to display the mathematical outcome
-        await interaction.followup.send(f"**Dice Result:** {character.character_name} rolled **{total}** ({roll_summary}). Calling the DM...")
-
-        # 4. Invoke the Cached Gemini Narrator via Jinja2 Prompts
+    async def _execute_narrator_handoff(self, interaction: discord.Interaction, roll_summary: str, old_vitals):
+        """Compiles prompt templates and fires the long-context Gemini Narrator."""
         session = await GameSession.find_one(GameSession.channel_id == self.channel_id, fetch_links=True)
+        character = await CharacterSheet.find_one(CharacterSheet.channel_id == self.channel_id, CharacterSheet.player_id == self.player_id)
         
+        # Render narrative prompt parameters via Jinja2
         template = jinja_env.get_template("narrator_prompt.j2")
         rendered_prompt = template.render(
             character=character,
@@ -87,10 +52,8 @@ class DiceRollView(discord.ui.View):
             old_vitals=old_vitals
         )
 
-        # Slide the Context Cache TTL forward to protect ongoing session RAM budgets
+        # Slide the long-context window forward to protect RAM allocation limits
         gemini_service.bump_context_cache_ttl(session.active_module.gemini_file_uri)
-        
-        # Route to Gemini API Client via file reference handle
         client = gemini_service.get_client()
         module_file_handle = client.files.get(name=session.active_module.gemini_file_uri.split('/')[-1])
 
@@ -98,24 +61,97 @@ class DiceRollView(discord.ui.View):
             model=gemini_service.model_name,
             contents=[module_file_handle, rendered_prompt]
         )
-
-        # 5. Presentation Layer delivery
+        
+        # Dispatch final storytelling text blocks back to the Discord thread
         await interaction.followup.send(response.text)
-        self.stop() # Kill the UI View tracker loop cleanly
+        self.stop()
 
-    async def on_timeout(self):
-        # Handle player hesitation by closing the view interaction channel
-        print(f"⌛ Roll timeout occurred in channel {self.channel_id}")
+    @discord.ui.button(label="🎲 CLICK TO ROLL", style=discord.ButtonStyle.primary, custom_id="single_roll_btn")
+    async def initial_roll_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.player_id:
+            await interaction.response.send_message("This isn't your fate to decide, traveler!", ephemeral=True)
+            return
 
+        await interaction.response.defer()
+        
+        character = await CharacterSheet.find_one(CharacterSheet.channel_id == self.channel_id, CharacterSheet.player_id == self.player_id)
+        modifier = character.base_skills.get(self.roll_type, 0)
+        
+        d20 = random.randint(1, 20)
+        self.first_roll = d20
+        total = d20 + modifier
+        old_vitals = character.vitals.copy()
+
+        # PATH A: SUCCESS OR NO HEROIC INSPIRATION -> Lock the turn instantly
+        if total >= self.target_dc or not character.vitals.has_heroic_inspiration:
+            self.final_total = total
+            button.disabled = True
+            await interaction.message.edit(view=self)
+            
+            success_tag = "SUCCESS" if total >= self.target_dc else "FAILURE"
+            summary = f"{success_tag}! Rolled {d20} + {modifier} = {total} (vs DC {self.target_dc})"
+            
+            # Apply standard fail environmental damage delta if applicable
+            if total < self.target_dc:
+                current_hp = character.vitals.session_current_hp if character.vitals.session_current_hp is not None else character.vitals.base_max_hp
+                character.vitals.session_current_hp = max(0, current_hp - 4)
+                await character.save()
+                
+            await interaction.followup.send(f"**Dice Result:** {character.character_name} rolled **{total}** ({summary}). Adjudicating scene...")
+            await self._execute_narrator_handoff(interaction, summary, old_vitals)
+        
+        # PATH B: FAILURE BUT HAS HEROIC INSPIRATION -> Morph UI View container layout to present choice
+        else:
+            button.disabled = True
+            
+            # Dynamically spawn the 2024 option button onto the active interface view
+            reroll_btn = discord.ui.Button(label="⚡ ACTIVATE HEROIC REROLL", style=discord.ButtonStyle.danger, custom_id="single_heroic_btn")
+            
+            # Inline callback execution logic for the dynamic reroll button
+            async def reroll_callback(inter: discord.Interaction):
+                if str(inter.user.id) != self.player_id: 
+                    return
+                await inter.response.defer()
+                
+                # 2024 Rule Override Math Calculation
+                new_d20 = random.randint(1, 20)
+                new_total = new_d20 + modifier
+                self.final_total = new_total
+                
+                # Close view layers
+                reroll_btn.disabled = True
+                await inter.message.edit(view=self)
+                
+                # Drain the 2024 Heroic Inspiration flag from MongoDB
+                character.vitals.has_heroic_inspiration = False
+                if new_total < self.target_dc:
+                    current_hp = character.vitals.session_current_hp if character.vitals.session_current_hp is not None else character.vitals.base_max_hp
+                    character.vitals.session_current_hp = max(0, current_hp - 4)
+                await character.save()
+                
+                success_tag = "SUCCESS" if new_total >= self.target_dc else "FAILURE"
+                summary = f"{success_tag}! **Heroic Reroll:** {new_d20} + {modifier} = {new_total} (vs DC {self.target_dc}, Overwrote {self.first_roll})"
+                
+                await inter.followup.send(f"💥 **Heroic Reroll Triggered!** New Total: **{new_total}** ({summary})")
+                await self._execute_narrator_handoff(inter, summary, old_vitals)
+
+            reroll_btn.callback = reroll_callback
+            self.add_item(reroll_btn)
+            
+            # Update the parent message text to prompt the player for their decision
+            await interaction.message.edit(
+                content=f"⚠️ **Check Failed!** You rolled a total of `{total}` (vs DC {self.target_dc}). Spend your Heroic Inspiration to completely overwrite this roll?", 
+                view=self
+            )
 
 # ==============================================================================
-# CORE DISCORD ACTION COG
+# CORE COG INTERACTION GATEWAY
 # ==============================================================================
 class ActionCog(commands.Cog):
-    """Manages natural language gameplay inputs and runs the Rule Check sequence."""
+    """Manages proactive, natural-language player actions and executes the Rule Check cycle."""
     def __init__(self, bot):
         self.bot = bot
-        # Thread-safe async session locks dictionary mapping channel IDs to an active lock
+        # Thread-safe asyncio lock cache queue mapping channel IDs
         self.session_locks = defaultdict(asyncio.Lock)
 
     @commands.Cog.listener()
@@ -123,23 +159,21 @@ class ActionCog(commands.Cog):
         # 1. Pipeline Traffic Guards
         if message.author.bot:
             return
-        # Ignore messages starting with commands or mentioning the Lorekeeper bot profile
         if message.content.startswith("!") or message.content.startswith("/") or self.bot.user.mentioned_in(message):
             return
-        # Ignore text wrapped explicitly inside Out-Of-Character brackets
         if message.content.strip().startswith("((") and message.content.strip().endswith("))"):
             return
 
         channel_id = str(message.channel.id)
         player_id = str(message.author.id)
 
-        # 2. Fire the Concurrency Lock System to freeze multi-user race conditions
+        # 2. Concurrency queue lock engagement to stamp out race conditions
         async with self.session_locks[channel_id]:
             
-            # Fetch active game state from MongoDB
+            # Lookup structural game session fields
             session = await GameSession.find_one(GameSession.channel_id == channel_id, fetch_links=True)
             if not session:
-                return # Silence if no active session is provisioned in this channel
+                return # Silence if room session hasn't been instantiated via /load_module
 
             character = await CharacterSheet.find_one(
                 CharacterSheet.channel_id == channel_id,
@@ -154,7 +188,7 @@ class ActionCog(commands.Cog):
                 RoomContext.room_id == session.current_room_id
             )
 
-            # 3. Construct and Execute the Rule Check Call
+            # 3. Compile and dispatch the Rule Check Prompt
             rule_template = jinja_env.get_template("rule_check.j2")
             rendered_rule_prompt = rule_template.render(
                 character=character,
@@ -165,11 +199,7 @@ class ActionCog(commands.Cog):
             async with message.channel.typing():
                 client = gemini_service.get_client()
                 
-                # Define expected schema constraints using inline type configurations
-                class RuleResponse(pydantic_model := json.loads):
-                    pass # Handled on the fly via Gemini Schema injection maps
-
-                # To match Pydantic schema outputs accurately inside Gemini 3.1 Flash-Lite:
+                # Define constraints schema mapping parameters for Gemini 3.1 Flash-Lite
                 response_schema = {
                     "type": "OBJECT",
                     "properties": {
@@ -181,26 +211,22 @@ class ActionCog(commands.Cog):
                     "required": ["action_valid", "rejection_reason", "roll_required", "target_dc"]
                 }
 
-                # Evaluate mechanics via static rules cache
                 rule_response = client.models.generate_content(
                     model=gemini_service.model_name,
                     contents=[rendered_rule_prompt],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=response_schema
-                    )
+                        )
                 )
-
                 decision = json.loads(rule_response.text)
 
-            # 4. Process Adjudication Results
+            # 4. Adjudicate results
             if not decision["action_valid"]:
-                # Mechanical Rejection (e.g., Target out of range / slot empty)
-                await message.reply(f"❌ **Action Denied:** {decision['rejection_reason']}")
+                await message.reply(f"❌ Action Denied: {decision['rejection_reason']}")
                 return
-
-            # Action Approved: Instantiate the interactive component loop
-            view = DiceRollView(
+            # Action Approved: Instantiate the multi-stage single-player view state loop
+            view = SinglePlayerRollView(
                 channel_id=channel_id,
                 player_id=player_id,
                 roll_type=decision["roll_required"],
@@ -208,11 +234,11 @@ class ActionCog(commands.Cog):
                 action_text=message.content
             )
             
-            await message.reply(
-                f"🎲 **Action Validated:** {character.character_name} attempts to execute their action.\n"
-                f"Requires a **DC {decision['target_dc']} {decision['roll_required']}** check.",
-                view=view
-            )
-
+        await message.reply(
+            f"🎲 Action Validated: {character.character_name} attempts to execute their action.\n"
+            f"Requires a DC {decision['target_dc']} {decision['roll_required']} check.",
+            view=view
+        )
+            
 async def setup(bot):
     await bot.add_cog(ActionCog(bot))
