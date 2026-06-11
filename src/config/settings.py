@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import List, Union
 from pydantic import Field, MongoDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,13 +16,17 @@ class AppSettings(BaseSettings):
     gemini_api_key: str = Field(..., alias="GEMINI_API_KEY")
     
     # 3. MongoDB Configuration
-    # Using 'MongoDsn' forces Pydantic to validate that the connection string is well-formed
-    mongo_uri: MongoDsn = Field(..., alias="MONGO_URI")
+    # We allow both MongoDsn and str to make passing connection handles down scripts effortless
+    mongo_uri: Union[MongoDsn, str] = Field(..., alias="MONGO_URI")
 
     # 4. Define configuration loading parameters
     model_config = SettingsConfigDict(
-        # Looks for .env file at the workspace root directory relative to where main.py runs
-        env_file=Path(__file__).resolve().parent.parent.parent / ".env",
+        # Robust fallback array: Checks workspace root, then checks relative to this config file
+        env_file=[
+            Path.cwd() / ".env", 
+            Path(__file__).resolve().parent / ".env",
+            Path(__file__).resolve().parent.parent.parent / ".env"
+        ],
         env_file_encoding="utf-8",
         # If an extra variable exists in the .env file that isn't typed above, ignore it safely
         extra="ignore",

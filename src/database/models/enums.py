@@ -1,0 +1,60 @@
+from enum import Enum
+
+class CreatureSize(str, Enum):
+    TINY = "TINY"
+    SMALL = "SMALL"
+    MEDIUM = "MEDIUM"
+    LARGE = "LARGE"
+    HUGE = "HUGE"
+    GARGANTUAN = "GARGANTUAN"
+
+class AttackType(str, Enum):
+    MELEE_ATTACK = "MELEE_ATTACK"
+    RANGED_ATTACK = "RANGED_ATTACK"
+    SPELL_ATTACK = "SPELL_ATTACK"
+
+class ExitType(str, Enum):
+    OPEN_ARCHWAY = "OPEN_ARCHWAY"
+    WOODEN_DOOR = "WOODEN_DOOR"
+    IRON_DOOR = "IRON_DOOR"
+    SECRET_DOOR = "SECRET_DOOR"
+    WALL = "WALL"
+
+class LightingLevel(str, Enum):
+    BRIGHT_LIGHT = "BRIGHT_LIGHT"
+    DIM_LIGHT = "DIM_LIGHT"
+    DARKNESS = "DARKNESS"
+
+class SessionStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+
+class SpeakerType(str, Enum):
+    PLAYER = "PLAYER"
+    RULES_ENGINE = "RULES_ENGINE"
+    NARRATOR = "NARRATOR"
+    SYSTEM = "SYSTEM"
+
+class ConditionType(str, Enum):
+    BLINDED = "BLINDED"
+    CHARMED = "CHARMED"
+    DEAFENED = "DEAFENED"
+    FRIGHTENED = "FRIGHTENED"
+    GRAPPLED = "GRAPPLED"
+    INCAPACITATED = "INCAPACITATED"
+    INVISIBLE = "INVISIBLE"
+    PARALYZED = "PARALYZED"
+    PETRIFIED = "PETRIFIED"
+    POISONED = "POISONED"
+    PRONE = "PRONE"
+    RESTRAINED = "RESTRAINED"
+    STUNNED = "STUNNED"
+    UNCONSCIOUS = "UNCONSCIOUS"
+    EXHAUSTION = "EXHAUSTION"
+
+class EffectDuration(str, Enum):
+    ROUND = "ROUND"
+    SHORT_REST = "SHORT_REST"
+    LONG_REST = "LONG_REST"
+    PERMANENT = "PERMANENT"
