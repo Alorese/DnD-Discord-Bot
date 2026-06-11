@@ -3,3 +3,5 @@ venv/
 .venv/
 .env
 .continue/
+raw_pdf/
+markdown_pdf/

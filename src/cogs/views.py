@@ -3,6 +3,53 @@ import random
 from beanie import PydanticObjectId
 from database.models.session import GameSession
 
+class ExplorationNavigationView(discord.ui.View):
+    def __init__(self, session_id: PydanticObjectId, leader_user_id: str, available_exits: dict):
+        super().__init__(timeout=180)
+        self.session_id = session_id
+        self.leader_user_id = leader_user_id
+        self.available_exits = available_exits
+
+        # Dynamically disable button pointers if no valid room connection exists
+        if available_exits.get("north", "none") == "none": self.go_north.disabled = True
+        if available_exits.get("south", "none") == "none": self.go_south.disabled = True
+        if available_exits.get("east", "none") == "none": self.go_east.disabled = True
+        if available_exits.get("west", "none") == "none": self.go_west.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Enforces Lead Token rules: Only the party leader can advance the map."""
+        if str(interaction.user.id) != self.leader_user_id:
+            await interaction.response.send_message("❌ Only the appointed Party Leader can navigate the map layout.", ephemeral=True)
+            return False
+        return True
+
+    async def execute_move(self, interaction: discord.Interaction, direction: str):
+        """Processes room transition state updates natively in Python code."""
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+        target_room_id = self.available_exits[direction]
+        
+        # Dispatch move event over to the ExplorationCog namespace loop
+        interaction.client.dispatch("party_move_execute", self.session_id, target_room_id, interaction.channel)
+
+    @discord.ui.button(label="North", style=discord.ButtonStyle.primary, emoji="⬆️", row=0)
+    async def go_north(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.execute_move(interaction, "north")
+
+    @discord.ui.button(label="West", style=discord.ButtonStyle.primary, emoji="⬅️", row=1)
+    async def go_west(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.execute_move(interaction, "west")
+
+    @discord.ui.button(label="South", style=discord.ButtonStyle.primary, emoji="⬇️", row=1)
+    async def go_south(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.execute_move(interaction, "south")
+
+    @discord.ui.button(label="East", style=discord.ButtonStyle.primary, emoji="➡️", row=1)
+    async def go_east(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.execute_move(interaction, "east")
+
 class InitialDiceRollView(discord.ui.View):
     def __init__(self, session_id: PydanticObjectId, character_id: str, stat_name: str, target_dc: int, modifier: int, can_use_inspiration: bool):
         super().__init__(timeout=120)
