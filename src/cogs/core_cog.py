@@ -17,10 +17,10 @@ from discord import app_commands
 from google import genai
 from google.genai import types
 
-from utils.template_service import prompt_service
+from services.template_service import prompt_service
 from database.models.session import GameSession, SessionStatus, SpeakerType, ChatMessage
 from database.models.room import Room
-from .views import ModuleStartView
+from views.session_setup_views import ModuleStartView, ModuleSelectMenu, CharacterJoinView
 
 class CoreCog(commands.Cog):
     def __init__(self, bot):
@@ -31,6 +31,7 @@ class CoreCog(commands.Cog):
     async def start_session(self, interaction: discord.Interaction):
         """Queries unique campaign blueprints from MongoDB and prompts selection dropdown."""
         # Enforce safety check: prevent establishing multiple simultaneous running lobbies
+        print(f"Checking for existing lobbies...")
         existing_lobby = await GameSession.find_one(GameSession.session_status == SessionStatus.LOBBY)
         if existing_lobby:
             return await interaction.response.send_message(
@@ -42,16 +43,46 @@ class CoreCog(commands.Cog):
         room_collection = Room.get_motor_collection()
         distinct_campaigns = await room_collection.distinct("module_id")
 
+        print(f"Checking for existing modules")
         if not distinct_campaigns:
             return await interaction.response.send_message(
                 "❌ **No Ingested Modules Detected!** Your blueprint library collection is completely empty. "
                 "Please run `/import_module` first.", ephemeral=True
             )
 
+        # Create and display the dropdown menu
+        print(f"Creating module select view")
         view = ModuleStartView(campaign_slugs=distinct_campaigns, dm_id=interaction.user.id)
         await interaction.response.send_message(
-            content="📋 **Dungeon Master Module Selector**\nChoose which campaign configuration profile to load tonight:",
+            content="📋 **Dungeon Master Module Selector**\nChoose which campaign configuration profile to load:",
             view=view, ephemeral=True
+        )
+
+    @app_commands.command(name="join_session", description="Browse and choose an imported character profile to join the open campaign lobby.")
+    async def join_session(self, interaction: discord.Interaction):
+        """Queries user sheets from MongoDB and displays the selection dropdown view."""
+        # 1. Locate if there is an active running campaign registration lobby open in this guild server zone
+        # (Assuming your GameSession models are active or you filter by ACTIVE status fields)
+        session = await GameSession.find_one(GameSession.session_status == SessionStatus.ACTIVE)
+        if not session:
+            return await interaction.response.send_message("❌ No active, open campaign session lobbies found running on this server space.", ephemeral=True)
+
+        # 2. Query all master sheets tied explicitly to this specific caller's discord user id string
+        player_sheets = await CharacterSheet.find(CharacterSheet.user_id == str(interaction.user.id)).to_list()
+        
+        if not player_sheets:
+            return await interaction.response.send_message(
+                "❌ **No Character Profiles Detected!** You don't have any imported characters bound to your ID.\n"
+                "Please run `/import_character <url>` first to link an adventurer to your account.", ephemeral=True
+            )
+
+        # 3. Instantiate and deploy our drop-down component view select layouts
+        view = CharacterJoinView(characters=player_sheets, session_id=session.id, voter_id=interaction.user.id)
+        
+        await interaction.response.send_message(
+            content="📋 **Character Registration Selector**\nChoose which sheet you want to load into this campaign session:",
+            view=view,
+            ephemeral=True # Kept hidden so other server players don't see your personal sheets choice popup dropdown menus
         )
 
     @app_commands.command(name="begin_campaign", description="DM Only: Closes the lobby and triggers the cinematic opening narrative.")

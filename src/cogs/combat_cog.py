@@ -1,157 +1,185 @@
-import os
-import random
 import discord
 from discord.ext import commands
-from jinja2 import Environment, FileSystemLoader
+from discord import app_commands
 from google import genai
 from google.genai import types
-# Import your strong-typed Beanie schemas
-from database.models.session import GameSession, SpeakerType, ChatMessage
+import random
+from database.models.session import GameSession, CombatState, InitiativeTurn, SpeakerType, ChatMessage
 from database.models.room import Room
 from database.models.monster import Monster
+from services.template_service import prompt_service
+from views.combat_views import PlayerCombatAttackView
 
 class CombatCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # 1. Initialize Jinja2 environment looking inside the templates folder
-        self.jinja_env = Environment(loader=FileSystemLoader("templates"))
-        # 2. Initialize Google GenAI Client for Gemini 3.1 Flash Lite
         self.ai_client = genai.Client()
 
-    async def execute_monster_turn(self, ctx, session: GameSession, monster_instance_id: str):
-        """Programmatically executes an active monster's complete turn cycle."""
-        await ctx.send(f"📖 *{monster_instance_id.replace('_', ' ').title()} is calculating tactical movement...*")
+    @app_commands.command(name="initiate_combat", description="DM Only: Freezes normal exploration and rolls initiative order values.")
+    async def initiate_combat(self, ctx):
+        """Builds combat sequence loops out of active room blueprint contents."""
+        session = await GameSession.find_one({"party_state.active_characters.user_id": str(ctx.user.id)})
+        if not session or session.combat_state.in_combat:
+            return await ctx.response.send_message("❌ Combat is either already running or session lobby is unavailable.", ephemeral=True)
 
-        # Extract base monster identity slug from instance tracking string (e.g. "goblin_sentry_1" -> "goblin_sentry")
-        monster_base_slug = "_".join(monster_instance_id.split("_")[:-1])
-        
-        # Pull required DB records concurrently
+        await ctx.response.defer()
         room = await Room.find_one(Room.room_id == session.party_state.current_room_id)
-        monster_blueprint = await Monster.find_one(Monster.monster_id == monster_base_slug)
-        
-        if not room or not monster_blueprint:
-            return await ctx.send("❌ Error: Missing mechanical room/monster assets in database.")
 
-        # --- STEP 1: Jinja2 Injection for Rules Engine Choice ---
-        rules_template = self.jinja_env.get_template("rules_monster_brain.jinja")
-        rules_prompt = rules_template.render(room=room, session=session, monster=monster_blueprint)
+        initiative_list = []
 
-        # Call Gemini 3.1 Flash Lite configured as the strict JSON rules brain
-        rules_response = self.ai_client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=rules_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.1, # High determinism for logic engine
-                response_mime_type="application/json"
-            )
-        )
-        
-        # Safely extract decision metrics out of model JSON string
-        import json
-        decision = json.loads(rules_response.text)
-        action_name = decision["action_name"]
-        target_id = decision["target_character_id"]
+        # 1. Roll automated true random initiative for players
+        for char_id, actor in session.party_state.active_characters.items():
+            roll = random.randint(1, 20) + actor.initiative_modifier
+            initiative_list.append(InitiativeTurn(entity_id=char_id, entity_type="PLAYER", roll_total=roll))
 
-        # --- STEP 2: Pure Python Tool Evaluation (The Math Layer) ---
-        attack = next(a for a in monster_blueprint.actions if a.name == action_name)
-        player_target = session.party_state.active_characters[target_id]
-
-        d20_roll = random.randint(1, 20)
-        total_hit = d20_roll + attack.hit_modifier
-        hit_success = total_hit >= player_target.armor_class
-        
-        damage_dealt = 0
-        if hit_success:
-            # Basic parsing of standard formula syntax like "1d6 + 2"
-            # (In production, replace with a secure regex dice-roller helper)
-            dice_count, dice_faces = map(int, attack.damage_formula.split("+")[0].strip().split("d"))
-            base_damage = sum(random.randint(1, dice_faces) for _ in range(dice_count))
-            flat_bonus = int(attack.damage_formula.split("+")[1].strip()) if "+" in attack.damage_formula else 0
-            damage_dealt = base_damage + flat_bonus
+        # 2. Spawn monster instance references and roll NPC initiative values
+        for idx, m_template in enumerate(room.encounters.monsters):
+            monster_blueprint = await Monster.find_one(Monster.monster_id == m_template.monster_id)
             
-            # Reduce health safely in the active memory footprint
-            player_target.current_hp = max(0, player_target.current_hp - damage_dealt)
+            for qty in range(1, m_template.quantity + 1):
+                instance_slug = f"{m_template.monster_id}_{qty}"
+                
+                # Setup live instance health tracking array mapping records
+                from models.session import NpcDelta
+                session.npc_deltas[instance_slug] = NpcDelta(
+                    current_hp=monster_blueprint.defenses.hit_points.average,
+                    max_hp=monster_blueprint.defenses.hit_points.average,
+                    attitude="HOSTILE"
+                )
+                
+                roll = random.randint(1, 20) + monster_blueprint.mobility_and_senses.passive_perception # Initiative proxy modifier
+                initiative_list.append(InitiativeTurn(entity_id=instance_slug, entity_type="NPC", roll_total=roll))
 
-        # Build structural validation package
-        math_payload = {
-            "monster_name": monster_blueprint.name,
-            "attack_name": action_name,
-            "hit_roll_breakdown": f"Rolled {d20_roll} + {attack.hit_modifier} = {total_hit} vs AC {player_target.armor_class}",
-            "hit_success": hit_success,
-            "damage_dealt": damage_dealt,
-            "target_name": player_target.name,
-            "player_dead": player_target.current_hp <= 0
-        }
+        # Sort the turn array descending based on total roll scores
+        initiative_list.sort(key=lambda x: x.roll_total, reverse=True)
 
-        # --- STEP 3: Jinja2 Injection for Narrative Generation ---
-        narrator_template = self.jinja_env.get_template("narrator_combat_block.jinja")
-        narrator_prompt = narrator_template.render(room=room, payload=math_payload)
-
-        # Call Gemini 3.1 Flash Lite as the creative DM voice (Explicit caching prefix sits here)
-        narrator_response = self.ai_client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=narrator_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.85, # Rich linguistic variety
-            )
+        # Commit initial structural combat settings to MongoDB via Beanie
+        session.combat_state = CombatState(
+            in_combat=True,
+            current_round=1,
+            active_turn_index=0,
+            initiative_order=initiative_list
         )
-
-        # --- STEP 4: Session Memory & DB Save Commitment ---
-        story_output = narrator_response.text
-        
-        # Append transactional log items back to your running MongoDB session history
-        session.narrative_memory.recent_chat_history.append(
-            ChatMessage(speaker=SpeakerType.RULES_ENGINE, text=f"{monster_instance_id} attacks {player_target.name}: {math_payload['hit_roll_breakdown']} (Dealt {damage_dealt} DMG)")
-        )
-        session.narrative_memory.recent_chat_history.append(
-            ChatMessage(speaker=SpeakerType.NARRATOR, text=story_output)
-        )
-        
-        # Commit all mutations to MongoDB via Beanie
         await session.save()
 
-        # Send finalized immersive story layout blocks back to the chat channel
-        embed = discord.Embed(
-            title=f"⚔️ Encounter Combat Tracker: {monster_blueprint.name}'s Action",
-            description=story_output,
-            color=discord.Color.red() if hit_success else discord.Color.blue()
-        )
-        embed.set_footer(text=math_payload["hit_roll_breakdown"])
-        await ctx.send(embed=embed)
+        # Build clean visual output board layout representation
+        order_board = "\n".join([f"**{idx+1}.** {turn.entity_id.replace('_',' ').title()} *(Roll: {turn.roll_total})*" for idx, turn in enumerate(initiative_list)])
         
-        # Automatically advance turn index pipeline forward
-        await self.rotate_turn_queue(ctx, session)
+        embed = discord.Embed(title="⚔️ Initiative Combat Roll Commenced!", description=f"The environment tightens as weapons are drawn!\n\n{order_board}", color=discord.Color.red())
+        await ctx.followup.send(embed=embed)
 
-    async def rotate_turn_queue(self, ctx, session: GameSession):
-        """Advances initiative pointer slots and updates combat rounds."""
+        # Trigger initial turn allocation sequence
+        await self.process_active_combat_turn(ctx.channel, session)
+
+    async def process_active_combat_turn(self, channel, session: GameSession):
+        """Orchestrates turn handovers based on active queue properties."""
+        active_turn = session.combat_state.initiative_order[session.combat_state.active_turn_index]
+
+        # --- BRANCH A: AUTOMATED NPC ENEMY AI MONSTER BRAIN TURN ---
+        if active_turn.entity_type == "NPC":
+            npc_delta = session.npc_deltas.get(active_turn.entity_id)
+            if npc_delta.attitude == "DEAD":
+                return await self.advance_combat_queue(channel, session) # Automatically skip dead monsters
+
+            await channel.send(f"🤖 *{active_turn.entity_id.replace('_',' ').title()} compiles hostile tactical actions...*")
+            # (Runs automated rules model calculation script we built earlier inside step 2)
+            # For simplicity in testing, we assume monster executes a standard attack roll via code tools...
+            await self.execute_automated_npc_turn(channel, session, active_turn.entity_id)
+
+        # --- BRANCH B: PLAYER CHARACTER STRIPPED BUTTON ACTION PROMPT ---
+        else:
+            actor = session.party_state.active_characters[active_turn.entity_id]
+            # Hardcoded target monster example selector lookup for template testing
+            first_live_npc = next((k for k, v in session.npc_deltas.items() if v.attitude != "DEAD"), None)
+            
+            if not first_live_npc:
+                # Combat victory condition caught!
+                session.combat_state.in_combat = False
+                await session.save()
+                return await channel.send("🎉 **Victory! All hostiles inside the location have been completely neutralized!**")
+
+            # Initialize your simple button roll view passing calculated database parameters
+            view = PlayerCombatAttackView(
+                session_id=session.id,
+                player_user_id=actor.user_id,
+                actor_id=active_turn.entity_id,
+                monster_instance_id=first_live_npc,
+                attack_name="Longsword strike",
+                hit_modifier=4, # Hardcoded baseline attribute proxy modifier adjustment
+                target_ac=15 # Monster Armor Class reference
+            )
+
+            await channel.send(
+                content=f"🟢 <@{actor.user_id}>, it is your turn! **{actor.name}** targets **{first_live_npc.replace('_',' ').title()}**.\n"
+                        f"Click the interactive button below to resolve your attack options:",
+                view=view
+            )
+
+    @commands.Cog.listener()
+    async def on_combat_turn_resolve(self, session_id, math_payload: dict, channel: discord.TextChannel):
+        """Listener hook that picks up finalized math results and streams storytelling entries."""
+        session = await GameSession.get(session_id)
+        room = await Room.find_one(Room.room_id == session.party_state.current_room_id)
+
+        # Render Jinja2 template file layout
+        prompt = prompt_service.render_prompt("narrator_attack_block.jinja", room=room, payload=math_payload)
+
+        async with channel.typing():
+            response = self.ai_client.models.generate_content(
+                model="gemini-3.1-flash-lite", contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.8)
+            )
+            story_output = response.text
+
+        # Record updates to history ledger arrays
+        session.narrative_memory.recent_chat_history.append(ChatMessage(speaker=SpeakerType.NARRATOR, text=story_output))
+        await session.save()
+
+        embed = discord.Embed(title="💥 Combat Action Sequence Resolves", description=story_output, color=discord.Color.dark_orange())
+        embed.set_footer(text=math_payload["hit_roll_breakdown"])
+        await channel.send(embed=embed)
+
+        # Progress the active pointer to the next entity slot
+        await self.advance_combat_queue(channel, session)
+
+    async def advance_combat_queue(self, channel, session: GameSession):
         session.combat_state.active_turn_index += 1
-        
-        # Check if rotation round cycle completed
         if session.combat_state.active_turn_index >= len(session.combat_state.initiative_order):
             session.combat_state.active_turn_index = 0
             session.combat_state.current_round += 1
-            await ctx.send(f"🛡️ **Round {session.combat_state.current_round} has begun!**")
+            await channel.send(f"🛡️ **Combat Round {session.combat_state.current_round} begins!**")
 
         await session.save()
-        
-        # Evaluate entity properties of the next active slot
-        next_entity = session.combat_state.initiative_order[session.combat_state.active_turn_index]
-        
-        if next_entity.entity_type == "NPC":
-            # Recurse down the execution pipeline automatically
-            await self.execute_monster_turn(ctx, session, next_entity.entity_id)
-        else:
-            await ctx.send(f"🟢 It is now your turn to act, **{next_entity.entity_id}**! Submit your tactical action.")
+        await self.process_active_combat_turn(channel, session)
 
-    @commands.command(name="next_turn")
-    async def command_next_turn(self, ctx):
-        """Manual command to advance out of a player turn choice slot."""
-        # Find active session tracking user
-        session = await GameSession.find_one({"party_state.active_characters.user_id": str(ctx.author.id)})
-        if not session or not session.combat_state.in_combat:
-            return await ctx.send("Your party is not currently locked in initiative combat structures.")
-            
-        await self.rotate_turn_queue(ctx, session)
+    async def execute_automated_npc_turn(self, channel, session: GameSession, npc_instance_id: str):
+        """Executes a 100% automated monster calculation turn loop in pure Python."""
+        # Simple random targeting logic for testing
+        random_player_key = random.choice(list(session.party_state.active_characters.keys()))
+        player = session.party_state.active_characters[random_player_key]
+
+        d20_roll = random.randint(1, 20)
+        total_hit = d20_roll + 3 # Baseline monster hit modifier proxy
+        hit_success = total_hit >= player.armor_class
+
+        damage = 0
+        if hit_success:
+            damage = random.randint(1, 6) + 1
+            player.current_hp = max(0, player.current_hp - damage)
+
+        await session.save()
+
+        math_payload = {
+            "attacker_name": npc_instance_id.replace("_", " ").title(),
+            "attack_name": "Claw swipe",
+            "hit_roll_breakdown": f"NPC rolled {d20_roll} + 3 = **{total_hit}** vs Player AC {player.armor_class}",
+            "hit_success": hit_success,
+            "damage_dealt": damage,
+            "target_name": player.name,
+            "target_dead": player.current_hp <= 0
+        }
+
+        self.bot.dispatch("combat_turn_resolve", session.id, math_payload, channel)
 
 async def setup(bot):
     await bot.add_cog(CombatCog(bot))

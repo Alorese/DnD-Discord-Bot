@@ -1,0 +1,24 @@
+You are an expert TTRPG Data Integration Engineer. Your task is to extract structural dungeon locations, room metadata descriptions, flavor read-aloud texts, and enemy encounter variables from raw campaign book page fragments.
+
+CAMPAIGN MODULE ID SLUG:
+"{{ campaign_id }}"
+
+RAW MODULE TEXT CHUNK:
+"{{ text_chunk }}"
+
+INSTRUCTIONS:
+Extract every single distinct room, keyed dungeon location, crypt space, or area header contained within the text chunk. Map their properties into an array object named "rooms".
+
+FIELDS MAPPING REQUIREMENTS:
+1. "room_id": Generate a clean, lowercase snake_case string combining the campaign ID slug with the room number (e.g., "{{ campaign_id }}_lvl1_room_01").
+2. "title": The formal name of the location or area title header.
+3. "navigation": 
+   - "map_layer": Set to "level_1" or the explicit map layout section name.
+   - "x_coord" and "y_coord": Extrapolate or assign relative grid positioning increments starting at (0,0) for the entrance.
+   - "exits": Identify doors or open corridors leading to other rooms. Identify directions (north, south, east, west) and declare their type (e.g., OPEN_ARCHWAY, WOODEN_DOOR, IRON_DOOR) and "target_room_id".
+4. "environment": Extract horizontal "dimensions", "lighting" (BRIGHT_LIGHT, DIM_LIGHT, or DARKNESS), hazards, and interactive objects (like locked chests or altars).
+5. "encounters": Identify any monsters explicitly waiting or spawning in the room (e.g., goblin_sentry). Set combat_trigger_type to "NONE", "IMMEDIATE", or "CONDITIONAL".
+6. "story_and_triggers": List any required story plot flags or puzzle events.
+7. "llm_contexts": Set "read_aloud_text" to the literal italicized/boxed flavor prose meant for the players. Set "raw_parsed_markdown" to a comprehensive markdown distillation of the room's secret mechanics.
+
+Output a single, strict JSON block matching the schema validation rules precisely. Do not include markdown code fences (```json), outer backticks, or human conversational explanations.

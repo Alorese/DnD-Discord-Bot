@@ -94,7 +94,7 @@ class NarrativeEngineCog(commands.Cog):
 
 
 
-        async def enforce_context_history_pruning(self, session: GameSession) -> GameSession:
+    async def enforce_context_history_pruning(self, session: GameSession) -> GameSession:
         """
         Monitors running chat arrays. When the message collection logs grow too dense, 
         it compresses old transactions down into the continuous campaign summary text.

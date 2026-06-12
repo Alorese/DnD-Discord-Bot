@@ -173,25 +173,26 @@ class ImportCog(commands.Cog):
                 model_config = ConfigDict(extra="allow")
                 rooms: list[dict]
 
-            # --- STEP 2: Call Gemini 3.1 Flash Lite with Multimodal token references ---
-            # We use an empty keyword render to fetch system formatting boundaries
-            prompt = """
-            Analyze the uploaded campaign document file object. 
-            Identify and extract all individual locations, room descriptions, box read-aloud texts, and dungeon encounter zones.
-            Output a JSON payload containing an array list itemizing all discovered areas. Match the layout data specifications perfectly.
-            """
+            # --- STEP 2: Compile Context and Call Gemini with Multimodal Reference ---
+            # Render the prompt template passing your campaign ID slug and the raw text file chunk
+            prompt = prompt_service.render_prompt(
+                "module_ingestor.jinja",
+                campaign_id=campaign_id,
+                text_chunk=prompt_service.render_prompt("module_ingestor.jinja", campaign_id=campaign_id) 
+            )
 
+            # Define your API payload script instructions 
             ai_response = self.ai_client.models.generate_content(
-                model="gemini-3.1-flash-lite",
+                model="gemini-3.5-flash", # Or gemini-3.1-flash-lite with thinking_level="high"
                 contents=[uploaded_file_info, prompt],
                 config=types.GenerateContentConfig(
-                    temperature=0.1,
+                    temperature=0.1, # Enforce heavy structure consistency
                     response_mime_type="application/json",
                     response_schema=ModuleImportWrapper
                 )
             )
 
-            # --- STEP 3: Iterate JSON array and construct Beanie Models ---
+            # --- STEP 3: Iterate JSON Array and Construct Beanie Models Natively ---
             parsed_data = prompt_service.clean_json_response(ai_response.text)
             rooms_list = parsed_data.get("rooms", [])
 
